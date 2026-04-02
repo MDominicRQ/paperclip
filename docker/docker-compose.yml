@@ -31,7 +31,13 @@ services:
       BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}"
     volumes:
       - paperclip-data:/paperclip
-      - paperclip-app:/home/node
+      # --- Volúmenes para Claude Code ---
+      - ../.claude:/root/.claude
+      - ../.config/claude-code:/home/node/.config/claude-code
+      
+      # --- Volúmenes para OpenCode ---
+      - ../.local/share/opencode:/home/node/.local/share/opencode
+      - ../.config/opencode:/home/node/.config/opencode
     depends_on:
       db:
         condition: service_healthy
@@ -39,4 +45,3 @@ services:
 volumes:
   pgdata:
   paperclip-data:
-  paperclip-app:
