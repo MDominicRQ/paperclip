@@ -39,3 +39,4 @@ services:
 volumes:
   pgdata:
   paperclip-data:
+  paperclip-app:
