@@ -38,6 +38,10 @@ services:
       # --- Volúmenes para OpenCode ---
       - ../.local/share/opencode:/home/node/.local/share/opencode
       - ../.config/opencode:/home/node/.config/opencode
+
+      # --- Volumenes para Gemini ---
+      - ../gemini:/root/.gemini
+      - ../.config/gemini:/home/node/.config/gemini
     depends_on:
       db:
         condition: service_healthy
