@@ -42,6 +42,9 @@ services:
       # --- Volumenes para Gemini ---
       - ../.gemini:/root/.gemini
       - ../.config/gemini:/home/node/.config/gemini
+
+      # --- Volumenes Github CLI ---
+      - ../.config/gh:/home/node/.config/gh
     depends_on:
       db:
         condition: service_healthy
