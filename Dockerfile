@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1.20
+FROM nousresearch/hermes-agent:latest AS hermes_runtime
+
 FROM node:lts-trixie-slim AS base
 ARG USER_UID=1000
 ARG USER_GID=1000
@@ -51,12 +53,22 @@ ARG USER_UID=1000
 ARG USER_GID=1000
 WORKDIR /app
 COPY --chown=node:node --from=build /app /app
+
+# Hermes local runtime: keep the official Hermes image as the source of truth,
+# but expose its CLI inside the Paperclip container so adapters can invoke
+# `hermes` exactly like `claude`, `codex`, and `opencode`.
+COPY --from=hermes_runtime /opt/hermes /opt/hermes
+RUN chmod -R a+rX /opt/hermes \
+  && ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes \
+  && ln -sf /opt/hermes/.venv/bin/hermes-agent /usr/local/bin/hermes-agent \
+  && ln -sf /opt/hermes/.venv/bin/hermes-acp /usr/local/bin/hermes-acp
+
 RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai \
   && apt-get update \
-  && apt-get install -y --no-install-recommends openssh-client jq \
+  && apt-get install -y --no-install-recommends openssh-client jq ffmpeg procps \
   && rm -rf /var/lib/apt/lists/* \
-  && mkdir -p /paperclip \
-  && chown node:node /paperclip
+  && mkdir -p /paperclip /paperclip/hermes \
+  && chown -R node:node /paperclip
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
@@ -73,7 +85,13 @@ ENV NODE_ENV=production \
   PAPERCLIP_CONFIG=/paperclip/instances/default/config.json \
   PAPERCLIP_DEPLOYMENT_MODE=authenticated \
   PAPERCLIP_DEPLOYMENT_EXPOSURE=private \
-  OPENCODE_ALLOW_ALL_MODELS=true
+  OPENCODE_ALLOW_ALL_MODELS=true \
+  PYTHONUNBUFFERED=1 \
+  HERMES_HOME=/paperclip/hermes \
+  HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist \
+  PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright \
+  API_SERVER_ENABLED=false \
+  PATH=/opt/hermes/.venv/bin:/opt/data/.local/bin:${PATH}
 
 VOLUME ["/paperclip"]
 EXPOSE 3100
