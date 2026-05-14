@@ -121,6 +121,7 @@ import {
   syncSkills as hermesSyncSkills,
   detectModel as detectModelFromHermes,
 } from "hermes-paperclip-adapter/server";
+import { resolveHermesRuntimeConfig } from "./hermes-runtime-config.js";
 import {
   agentConfigurationDoc as hermesAgentConfigurationDoc,
   models as hermesModels,
@@ -443,6 +444,18 @@ const hermesLocalAdapter: ServerAdapterModule = {
       patchedConfig.promptTemplate = `${authGuardPrompt}\n\n${promptTemplate}`;
     }
 
+    const runtimeConfig = resolveHermesRuntimeConfig(normalizedCtx.agent.companyId, normalizedCtx.agent.id, patchedConfig);
+    console.info("[adapter:hermes_local] runtime-config-applied", {
+      companyId: normalizedCtx.agent.companyId,
+      agentId: normalizedCtx.agent.id,
+      runId: normalizedCtx.runId,
+      model: runtimeConfig.model,
+      capabilities: runtimeConfig.capabilities,
+      configHash: runtimeConfig.configHash,
+      resolvedAt: runtimeConfig.resolvedAt,
+      cacheState: runtimeConfig.cacheState,
+    });
+
     const patchedCtx = {
       ...normalizedCtx,
       agent: {
@@ -462,7 +475,16 @@ const hermesLocalAdapter: ServerAdapterModule = {
   supportsInstructionsBundle: false,
   requiresMaterializedRuntimeSkills: false,
   agentConfigurationDoc: hermesAgentConfigurationDoc,
-  detectModel: () => detectModelFromHermes(),
+  detectModel: async () => {
+    const detected = await detectModelFromHermes();
+    if (!detected) return detected;
+    console.info("[adapter:hermes_local] detect-model", {
+      provider: detected.provider,
+      model: detected.model,
+      source: detected.source,
+    });
+    return detected;
+  },
 };
 
 const adaptersByType = new Map<string, ServerAdapterModule>();
