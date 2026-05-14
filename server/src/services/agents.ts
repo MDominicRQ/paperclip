@@ -20,6 +20,7 @@ import { AGENT_DEFAULT_MAX_CONCURRENT_RUNS, isUuidLike, normalizeAgentUrlKey } f
 import { conflict, notFound, unprocessable } from "../errors.js";
 import { normalizeAgentPermissions } from "./agent-permissions.js";
 import { REDACTED_EVENT_VALUE, sanitizeRecord } from "../redaction.js";
+import { invalidateHermesRuntimeConfig } from "../adapters/hermes-runtime-config.js";
 
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -376,6 +377,15 @@ export function agentService(db: Db) {
       .then((rows) => rows[0] ?? null);
     const normalizedUpdated = updated ? normalizeAgentRow(updated) : null;
 
+
+    if (normalizedUpdated && normalizedUpdated.adapterType === "hermes_local") {
+      const adapterConfigTouched = Object.prototype.hasOwnProperty.call(normalizedPatch, "adapterConfig");
+      const capabilitiesTouched = Object.prototype.hasOwnProperty.call(normalizedPatch, "capabilities");
+      if (adapterConfigTouched || capabilitiesTouched) {
+        invalidateHermesRuntimeConfig(normalizedUpdated.companyId, normalizedUpdated.id);
+      }
+    }
+
     if (normalizedUpdated && shouldRecordRevision && beforeConfig) {
       const afterConfig = buildConfigSnapshot(normalizedUpdated);
       const changedKeys = diffConfigSnapshot(beforeConfig, afterConfig);
@@ -430,7 +440,11 @@ export function agentService(db: Db) {
         .returning()
         .then((rows) => rows[0]);
 
-      return normalizeAgentRow(created);
+      const normalizedCreated = normalizeAgentRow(created);
+      if (normalizedCreated.adapterType === "hermes_local") {
+        invalidateHermesRuntimeConfig(normalizedCreated.companyId, normalizedCreated.id);
+      }
+      return normalizedCreated;
     },
 
     update: updateAgent,
