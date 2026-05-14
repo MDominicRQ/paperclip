@@ -821,6 +821,65 @@ export function agentRoutes(
     return trimmed.length > 0 ? trimmed : null;
   }
 
+  type HermesIdentityMapping = {
+    companyId: string;
+    paperclipAgentId: string;
+    hermesAgentId: string;
+  };
+
+  function readHermesIdentityMapping(
+    companyId: string,
+    paperclipAgentId: string,
+    adapterType: string,
+    adapterConfig: Record<string, unknown>,
+  ): HermesIdentityMapping | null {
+    if (adapterType !== "hermes_local") return null;
+    const mappedCompanyId = asNonEmptyString(adapterConfig.company_id);
+    const mappedPaperclipAgentId = asNonEmptyString(adapterConfig.paperclip_agent_id);
+    const mappedHermesAgentId = asNonEmptyString(adapterConfig.hermes_agent_id);
+    const mappedWebhookSigningSecret = asNonEmptyString(adapterConfig.webhook_signing_secret);
+    if (!mappedCompanyId || !mappedPaperclipAgentId || !mappedHermesAgentId || !mappedWebhookSigningSecret) {
+      throw unprocessable(
+        "Hermes adapter config must include company_id, paperclip_agent_id, hermes_agent_id, and webhook_signing_secret",
+      );
+    }
+    if (mappedCompanyId !== companyId) {
+      throw unprocessable("Hermes adapter company_id must match the owning company");
+    }
+    return {
+      companyId: mappedCompanyId,
+      paperclipAgentId: mappedPaperclipAgentId,
+      hermesAgentId: mappedHermesAgentId,
+    };
+  }
+
+  async function assertHermesIdentityMappingUnique(input: {
+    companyId: string;
+    agentId: string;
+    adapterType: string;
+    adapterConfig: Record<string, unknown>;
+  }) {
+    const mapping = readHermesIdentityMapping(input.companyId, input.agentId, input.adapterType, input.adapterConfig);
+    if (!mapping) return;
+    const duplicateRows = await db.execute(sql`
+      select id
+      from agents
+      where company_id = ${mapping.companyId}
+        and adapter_type = 'hermes_local'
+        and id <> ${input.agentId}
+        and (
+          adapter_config->>'paperclip_agent_id' = ${mapping.paperclipAgentId}
+          or adapter_config->>'hermes_agent_id' = ${mapping.hermesAgentId}
+        )
+      limit 1
+    `);
+    if (duplicateRows.rows.length > 0) {
+      throw conflict(
+        "Hermes identity mapping must be unique per company for paperclip_agent_id and hermes_agent_id",
+      );
+    }
+  }
+
   function preserveInstructionsBundleConfig(
     existingAdapterConfig: Record<string, unknown>,
     nextAdapterConfig: Record<string, unknown>,
@@ -1390,6 +1449,36 @@ export function agentRoutes(
 
     const detected = await detectAdapterModel(type);
     res.json(detected);
+  });
+
+  router.get("/companies/:companyId/adapters/hermes/mappings", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    await assertCanReadConfigurations(req, companyId);
+
+    const rows = await db
+      .select({
+        agentId: agentsTable.id,
+        agentName: agentsTable.name,
+        adapterType: agentsTable.adapterType,
+        adapterConfig: agentsTable.adapterConfig,
+      })
+      .from(agentsTable)
+      .where(and(eq(agentsTable.companyId, companyId), eq(agentsTable.adapterType, "hermes_local")));
+
+    const mappings = rows.map((row) => {
+      const cfg = asRecord(row.adapterConfig) ?? {};
+      return {
+        agentId: row.agentId,
+        agentName: row.agentName,
+        adapterType: row.adapterType,
+        companyId: asNonEmptyString(cfg.company_id),
+        paperclipAgentId: asNonEmptyString(cfg.paperclip_agent_id),
+        hermesAgentId: asNonEmptyString(cfg.hermes_agent_id),
+        hasWebhookSigningSecret: asNonEmptyString(cfg.webhook_signing_secret) !== null,
+      };
+    });
+    res.json({ companyId, mappings });
   });
 
   router.post(
@@ -2172,6 +2261,16 @@ export function agentRoutes(
       adapterType: createInput.adapterType,
       adapterConfig: desiredSkillAssignment.adapterConfig,
     });
+    const createdAgentId = randomUUID();
+    if (createInput.adapterType === "hermes_local") {
+      normalizedAdapterConfig.paperclip_agent_id = createdAgentId;
+    }
+    await assertHermesIdentityMappingUnique({
+      companyId,
+      agentId: createdAgentId,
+      adapterType: createInput.adapterType,
+      adapterConfig: normalizedAdapterConfig,
+    });
     const normalizedRuntimeConfig = await normalizeRuntimeConfigAdapterConfigsForPersistence(
       companyId,
       createInput.adapterType,
@@ -2185,6 +2284,7 @@ export function agentRoutes(
     });
 
     const createdAgent = await svc.create(companyId, {
+      id: createdAgentId,
       ...createInput,
       adapterConfig: normalizedAdapterConfig,
       runtimeConfig: normalizedRuntimeConfig,
@@ -2640,6 +2740,12 @@ export function agentRoutes(
         companyId: existing.companyId,
         adapterType: requestedAdapterType,
         adapterConfig: effectiveAdapterConfig,
+      });
+      await assertHermesIdentityMappingUnique({
+        companyId: existing.companyId,
+        agentId: existing.id,
+        adapterType: requestedAdapterType,
+        adapterConfig: normalizedEffectiveAdapterConfig,
       });
       patchData.adapterConfig = syncInstructionsBundleConfigFromFilePath(existing, normalizedEffectiveAdapterConfig);
     }

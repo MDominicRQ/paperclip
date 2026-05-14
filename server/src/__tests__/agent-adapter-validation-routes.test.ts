@@ -142,10 +142,11 @@ async function createApp() {
         ]),
       })),
     })),
+    execute: vi.fn(async () => ({ rows: [] })),
   };
   app.use("/api", agentRoutes(db as any));
   app.use(errorHandler);
-  return app;
+  return { app, db };
 }
 
 async function requestApp(
@@ -233,7 +234,7 @@ describe("agent routes adapter validation", () => {
     const { registerServerAdapter } = await import("../adapters/index.js");
     registerServerAdapter(externalAdapter);
 
-    const app = await createApp();
+    const { app } = await createApp();
     const res = await requestApp(app, (baseUrl) =>
       request(baseUrl)
         .post("/api/companies/company-1/agents")
@@ -248,7 +249,7 @@ describe("agent routes adapter validation", () => {
   });
 
   it("rejects unknown adapter types even when schema accepts arbitrary strings", async () => {
-    const app = await createApp();
+    const { app } = await createApp();
     const res = await requestApp(app, (baseUrl) =>
       request(baseUrl)
         .post("/api/companies/company-1/agents")
@@ -260,5 +261,37 @@ describe("agent routes adapter validation", () => {
 
     expect(res.status, JSON.stringify(res.body)).toBe(422);
     expect(String(res.body.error ?? res.body.message ?? "")).toContain(`Unknown adapter type: ${missingAdapterType}`);
+  });
+
+  it("rejects hermes agents missing stable identity mapping keys", async () => {
+    const { app } = await createApp();
+    const res = await requestApp(app, (baseUrl) =>
+      request(baseUrl).post("/api/companies/company-1/agents").send({
+        name: "Hermes Agent",
+        adapterType: "hermes_local",
+        adapterConfig: {},
+      }),
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(422);
+    expect(String(res.body.error ?? "")).toContain("company_id");
+  });
+
+  it("rejects duplicate hermes identity mappings inside the same company", async () => {
+    const { app, db } = await createApp();
+    (db.execute as any).mockResolvedValueOnce({ rows: [{ id: "dup-agent" }] });
+    const res = await requestApp(app, (baseUrl) =>
+      request(baseUrl).post("/api/companies/company-1/agents").send({
+        name: "Hermes Agent",
+        adapterType: "hermes_local",
+        adapterConfig: {
+          company_id: "company-1",
+          paperclip_agent_id: "11111111-1111-4111-8111-111111111111",
+          hermes_agent_id: "hermes-007",
+          webhook_signing_secret: "top-secret",
+        },
+      }),
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(String(res.body.error ?? "")).toContain("must be unique");
   });
 });
