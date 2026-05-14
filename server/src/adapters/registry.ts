@@ -131,6 +131,7 @@ import { buildExternalAdapters } from "./plugin-loader.js";
 import { getDisabledAdapterTypes } from "../services/adapter-plugin-store.js";
 import { processAdapter } from "./process/index.js";
 import { httpAdapter } from "./http/index.js";
+import { getHermesAgentConfigVersion } from "../services/hermes-config-sync.js";
 
 function readConfiguredCommand(config: Record<string, unknown>, fallback: string): string {
   const value = typeof config.command === "string" ? config.command.trim() : "";
@@ -428,8 +429,10 @@ const hermesLocalAdapter: ServerAdapterModule = {
       "Never use a board, browser, or local-board session for Paperclip API writes.",
     ].join("\n");
 
+    const pushedConfigVersion = getHermesAgentConfigVersion(normalizedCtx.agent.id);
     const patchedConfig: Record<string, unknown> = {
       ...existingConfig,
+      ...(pushedConfigVersion ? { paperclipConfigVersion: pushedConfigVersion } : {}),
       env: {
         ...existingEnv,
         ...(!explicitApiKey ? { PAPERCLIP_API_KEY: normalizedCtx.authToken } : {}),
