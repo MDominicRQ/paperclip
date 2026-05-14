@@ -218,6 +218,13 @@ export const BOUNDED_TRANSIENT_HEARTBEAT_RETRY_DELAYS_MS = [
 ] as const;
 const BOUNDED_TRANSIENT_HEARTBEAT_RETRY_JITTER_RATIO = 0.25;
 const BOUNDED_TRANSIENT_HEARTBEAT_RETRY_REASON = "transient_failure";
+const HERMES_DRIFT_MIN_INTERVAL_MS = 30_000;
+const HERMES_DRIFT_MAX_BACKOFF_MS = 5 * 60_000;
+
+type HermesDriftPollState = {
+  nextPollAt: number;
+  backoffMs: number;
+};
 const BOUNDED_TRANSIENT_HEARTBEAT_RETRY_WAKE_REASON = "transient_failure_retry";
 const BOUNDED_TRANSIENT_HEARTBEAT_RETRY_MAX_ATTEMPTS = BOUNDED_TRANSIENT_HEARTBEAT_RETRY_DELAYS_MS.length;
 export const MAX_TURN_CONTINUATION_RETRY_REASON = "max_turns_continuation";
@@ -2327,6 +2334,7 @@ export interface HeartbeatServiceOptions {
 }
 
 export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) {
+  const hermesDriftPollState = new Map<string, HermesDriftPollState>();
   const instanceSettings = instanceSettingsService(db);
   const getCurrentUserRedactionOptions = async () => ({
     enabled: (await instanceSettings.getGeneral()).censorUsernameInLogs,
@@ -6629,6 +6637,87 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     return productivityReviews.reconcileProductivityReviews(opts);
   }
 
+  async function reconcileHermesAdapterDrift(now = new Date()) {
+    const telemetryClient = getTelemetryClient();
+    const agentsToCheck = await db
+      .select({
+        id: agents.id,
+        companyId: agents.companyId,
+        adapterType: agents.adapterType,
+        adapterConfig: agents.adapterConfig,
+        status: agents.status,
+        runtimeState: agentRuntimeState.stateJson,
+      })
+      .from(agents)
+      .leftJoin(agentRuntimeState, eq(agentRuntimeState.agentId, agents.id))
+      .where(and(eq(agents.adapterType, "hermes_local"), notInArray(agents.status, ["terminated"])));
+
+    let driftDetected = 0;
+    let driftReconciled = 0;
+    const nowMs = now.getTime();
+    for (const row of agentsToCheck) {
+      const existingPoll = hermesDriftPollState.get(row.id);
+      if (existingPoll && existingPoll.nextPollAt > nowMs) continue;
+      const adapter = getServerAdapter(row.adapterType);
+      if (!adapter) continue;
+      const currentConfigHash = JSON.stringify(row.adapterConfig ?? {});
+      const stateJson = (row.runtimeState ?? {}) as Record<string, unknown>;
+      const hermesSync = (stateJson.hermesSync ?? {}) as Record<string, unknown>;
+      const knownConfigHash = typeof hermesSync.configHash === "string" ? hermesSync.configHash : null;
+      const knownVersion = typeof hermesSync.version === "string" ? hermesSync.version : null;
+      let detectedVersion = knownVersion;
+      try {
+        const detected = adapter.detectModel ? await adapter.detectModel() : null;
+        detectedVersion = detected?.model ?? knownVersion;
+        const drift = knownConfigHash !== null && knownConfigHash !== currentConfigHash;
+        if (drift) {
+          driftDetected += 1;
+          await clearTaskSessions(row.companyId, row.id, { adapterType: row.adapterType });
+          await db
+            .update(agentRuntimeState)
+            .set({
+              sessionId: null,
+              stateJson: {
+                ...stateJson,
+                hermesSync: {
+                  version: detectedVersion,
+                  configHash: currentConfigHash,
+                  lastSuccessfulSyncAt: now.toISOString(),
+                },
+              },
+              updatedAt: now,
+            })
+            .where(eq(agentRuntimeState.agentId, row.id));
+          driftReconciled += 1;
+        } else {
+          await db
+            .update(agentRuntimeState)
+            .set({
+              stateJson: {
+                ...stateJson,
+                hermesSync: {
+                  version: detectedVersion,
+                  configHash: currentConfigHash,
+                  lastSuccessfulSyncAt: now.toISOString(),
+                },
+              },
+              updatedAt: now,
+            })
+            .where(eq(agentRuntimeState.agentId, row.id));
+        }
+        hermesDriftPollState.set(row.id, { nextPollAt: nowMs + HERMES_DRIFT_MIN_INTERVAL_MS, backoffMs: HERMES_DRIFT_MIN_INTERVAL_MS });
+      } catch {
+        const backoffMs = Math.min(existingPoll?.backoffMs ? existingPoll.backoffMs * 2 : HERMES_DRIFT_MIN_INTERVAL_MS, HERMES_DRIFT_MAX_BACKOFF_MS);
+        hermesDriftPollState.set(row.id, { nextPollAt: nowMs + backoffMs, backoffMs });
+      }
+    }
+    if (telemetryClient && (driftDetected > 0 || driftReconciled > 0)) {
+      telemetryClient.track("drift_detected", { count: driftDetected, adapterType: "hermes_local" });
+      telemetryClient.track("drift_reconciled", { count: driftReconciled, adapterType: "hermes_local" });
+    }
+    return { checked: agentsToCheck.length, driftDetected, driftReconciled };
+  }
+
   async function buildRunOutputSilence(
     run: Pick<
       typeof heartbeatRuns.$inferSelect,
@@ -9743,6 +9832,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     scanSilentActiveRuns,
 
     reconcileProductivityReviews,
+    reconcileHermesAdapterDrift,
 
     buildRunOutputSilence,
 
