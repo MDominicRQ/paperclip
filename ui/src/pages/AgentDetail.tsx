@@ -1149,6 +1149,7 @@ export function AgentDetail() {
           selectedRunId={urlRunId ?? null}
           adapterType={agent.adapterType}
           adapterConfig={agent.adapterConfig}
+          agentUpdatedAt={agent.updatedAt ? new Date(agent.updatedAt).toISOString() : null}
         />
       )}
 
@@ -2949,6 +2950,7 @@ function RunsTab({
   selectedRunId,
   adapterType,
   adapterConfig,
+  agentUpdatedAt,
 }: {
   runs: HeartbeatRun[];
   companyId: string;
@@ -2957,6 +2959,7 @@ function RunsTab({
   selectedRunId: string | null;
   adapterType: string;
   adapterConfig: Record<string, unknown>;
+  agentUpdatedAt: string | null;
 }) {
   const { isMobile } = useSidebar();
 
@@ -2985,7 +2988,7 @@ function RunsTab({
             <ArrowLeft className="h-3.5 w-3.5" />
             Back to runs
           </Link>
-          <RunDetail key={selectedRun.id} run={selectedRun} agentRouteId={agentRouteId} adapterType={adapterType} adapterConfig={adapterConfig} />
+          <RunDetail key={selectedRun.id} run={selectedRun} agentRouteId={agentRouteId} adapterType={adapterType} adapterConfig={adapterConfig} agentUpdatedAt={agentUpdatedAt} />
         </div>
       );
     }
@@ -3016,7 +3019,7 @@ function RunsTab({
       {/* Right: run detail — natural height, page scrolls */}
       {selectedRun && (
         <div className="flex-1 min-w-0 pl-4">
-          <RunDetail key={selectedRun.id} run={selectedRun} agentRouteId={agentRouteId} adapterType={adapterType} adapterConfig={adapterConfig} />
+          <RunDetail key={selectedRun.id} run={selectedRun} agentRouteId={agentRouteId} adapterType={adapterType} adapterConfig={adapterConfig} agentUpdatedAt={agentUpdatedAt} />
         </div>
       )}
     </div>
@@ -3025,7 +3028,7 @@ function RunsTab({
 
 /* ---- Run Detail (expanded) ---- */
 
-function RunDetail({ run: initialRun, agentRouteId, adapterType, adapterConfig }: { run: HeartbeatRun; agentRouteId: string; adapterType: string; adapterConfig: Record<string, unknown> }) {
+function RunDetail({ run: initialRun, agentRouteId, adapterType, adapterConfig, agentUpdatedAt }: { run: HeartbeatRun; agentRouteId: string; adapterType: string; adapterConfig: Record<string, unknown>; agentUpdatedAt: string | null }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { data: hydratedRun } = useQuery({
@@ -3177,7 +3180,7 @@ function RunDetail({ run: initialRun, agentRouteId, adapterType, adapterConfig }
   const runContext = asRecord(run.contextSnapshot);
   const runConfigVersion = asNonEmptyString(runContext?.configVersion);
   const runModelId = asNonEmptyString(runContext?.modelId);
-  const currentConfigVersion = agent?.updatedAt ? new Date(agent.updatedAt).toISOString() : null;
+  const currentConfigVersion = agentUpdatedAt ? new Date(agentUpdatedAt).toISOString() : null;
   const configChangedAfterRun =
     Boolean(runConfigVersion && currentConfigVersion && runConfigVersion !== currentConfigVersion);
 
