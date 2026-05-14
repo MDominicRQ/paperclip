@@ -35,6 +35,7 @@ import {
   type InstanceDatabaseBackupService,
 } from "./routes/instance-database-backups.js";
 import { llmRoutes } from "./routes/llms.js";
+import { hermesConfigEventRoutes } from "./routes/hermes-config-events.js";
 import { authRoutes } from "./routes/auth.js";
 import { assetRoutes } from "./routes/assets.js";
 import { accessRoutes } from "./routes/access.js";
@@ -171,6 +172,7 @@ export async function createApp(
     app.all("/api/auth/{*authPath}", opts.betterAuthHandler);
   }
   app.use(llmRoutes(db));
+  app.use("/api", hermesConfigEventRoutes(db));
 
   const hostServicesDisposers = new Map<string, () => void>();
   const workerManager = opts.pluginWorkerManager ?? createPluginWorkerManager();
