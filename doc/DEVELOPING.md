@@ -39,6 +39,15 @@ This starts:
 
 `pnpm dev` runs the server in watch mode and restarts on changes from workspace packages (including adapter packages). Use `pnpm dev:once` to run without file watching.
 
+## Run config-change semantics (Hermes and other adapters)
+
+- In-flight runs keep the adapter configuration they started with.
+- New runs started after an agent config edit use the new configuration immediately.
+- Paperclip persists run config trace fields in the run context snapshot:
+  - `configVersion` (ISO timestamp derived from the agent config update moment)
+  - `modelId` (the adapter model selected when the run was enqueued)
+- The Run detail UI surfaces a notice when current agent config differs from the run's `configVersion`, including the timestamp from which the new config applies.
+
 `pnpm dev:once` auto-applies pending local migrations by default before starting the dev server.
 
 `pnpm dev` and `pnpm dev:once` are now idempotent for the current repo and instance: if the matching Paperclip dev runner is already alive, Paperclip reports the existing process instead of starting a duplicate.

@@ -1827,6 +1827,21 @@ function enrichWakeContextSnapshot(input: {
   };
 }
 
+function stampRunConfigTrace(
+  contextSnapshot: Record<string, unknown>,
+  agent: { adapterConfig?: Record<string, unknown> | null; updatedAt?: Date | null },
+): Record<string, unknown> {
+  const modelId = readNonEmptyString(agent.adapterConfig?.model);
+  const configVersion = agent.updatedAt ? agent.updatedAt.toISOString() : null;
+  if (modelId && !readNonEmptyString(contextSnapshot.modelId)) {
+    contextSnapshot.modelId = modelId;
+  }
+  if (configVersion && !readNonEmptyString(contextSnapshot.configVersion)) {
+    contextSnapshot.configVersion = configVersion;
+  }
+  return contextSnapshot;
+}
+
 const INTERACTION_CONTINUATION_CONTEXT_KEYS = [
   "interactionId",
   "interactionKind",
@@ -8319,6 +8334,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           triggerDetail: promotedTriggerDetail,
           payload: promotedPayload,
         });
+        stampRunConfigTrace(promotedContextSnapshot, deferredAgent);
 
         const sessionBefore =
           readNonEmptyString(promotedContextSnapshot.resumeSessionDisplayId) ??
@@ -8566,6 +8582,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
 
     const agent = await getAgent(agentId);
     if (!agent) throw notFound("Agent not found");
+    stampRunConfigTrace(enrichedContextSnapshot, agent);
     const explicitResumeSession = await resolveExplicitResumeSessionOverride(agent, payload, taskKey);
     if (explicitResumeSession) {
       enrichedContextSnapshot.resumeFromRunId = explicitResumeSession.resumeFromRunId;
