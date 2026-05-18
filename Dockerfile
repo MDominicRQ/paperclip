@@ -66,7 +66,8 @@ COPY --from=hermes_runtime /opt/hermes /opt/hermes
 RUN chmod -R a+rX /opt/hermes \
   && ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes \
   && ln -sf /opt/hermes/.venv/bin/hermes-agent /usr/local/bin/hermes-agent \
-  && ln -sf /opt/hermes/.venv/bin/hermes-acp /usr/local/bin/hermes-acp
+  && ln -sf /opt/hermes/.venv/bin/hermes-acp /usr/local/bin/hermes-acp \
+  && /opt/hermes/.venv/bin/pip install --no-cache-dir "anthropic>=0.39.0"
 
 RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai \
   && apt-get update \
