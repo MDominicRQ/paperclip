@@ -67,7 +67,15 @@ RUN chmod -R a+rX /opt/hermes \
   && ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes \
   && ln -sf /opt/hermes/.venv/bin/hermes-agent /usr/local/bin/hermes-agent \
   && ln -sf /opt/hermes/.venv/bin/hermes-acp /usr/local/bin/hermes-acp \
-  && /opt/hermes/.venv/bin/pip install --no-cache-dir "anthropic>=0.39.0"
+  && if [ -x /opt/hermes/.venv/bin/pip ]; then \
+       /opt/hermes/.venv/bin/pip install --no-cache-dir "anthropic>=0.39.0"; \
+     elif [ -x /opt/hermes/.venv/bin/python ]; then \
+       /opt/hermes/.venv/bin/python -m ensurepip --upgrade >/dev/null 2>&1 || true; \
+       /opt/hermes/.venv/bin/python -m pip install --no-cache-dir "anthropic>=0.39.0"; \
+     else \
+       echo "ERROR: Hermes venv python not found at /opt/hermes/.venv/bin/python" >&2; \
+       exit 1; \
+     fi
 
 RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai \
   && apt-get update \
