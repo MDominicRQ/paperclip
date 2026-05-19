@@ -51,7 +51,9 @@ COPY . .
 RUN pnpm --filter @paperclipai/ui build
 RUN pnpm --filter @paperclipai/plugin-sdk build
 RUN pnpm --filter @paperclipai/server build
+RUN pnpm --filter @paperclipai/mcp-server build
 RUN test -f server/dist/index.js || (echo "ERROR: server build output missing" && exit 1)
+RUN test -f packages/mcp-server/dist/stdio.js || (echo "ERROR: mcp-server build output missing" && exit 1)
 
 FROM base AS production
 ARG USER_UID=1000
@@ -70,6 +72,8 @@ RUN chmod -R a+rX /opt/hermes \
   && ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes \
   && ln -sf /opt/hermes/.venv/bin/hermes-agent /usr/local/bin/hermes-agent \
   && ln -sf /opt/hermes/.venv/bin/hermes-acp /usr/local/bin/hermes-acp \
+  && ln -sf /app/packages/mcp-server/dist/stdio.js /usr/local/bin/paperclip-mcp-server \
+  && chmod +x /usr/local/bin/paperclip-mcp-server \
   && if [ ! -x /opt/hermes/.venv/bin/python ]; then \
        echo "ERROR: Hermes venv python not found at /opt/hermes/.venv/bin/python" >&2; \
        exit 1; \
@@ -82,7 +86,7 @@ RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/cod
   && apt-get update \
   && apt-get install -y --no-install-recommends openssh-client jq ffmpeg procps \
   && rm -rf /var/lib/apt/lists/* \
-  && mkdir -p /paperclip /paperclip/hermes \
+  && mkdir -p /paperclip /paperclip/hermes /paperclip/hermes/agents \
   && chown -R node:node /paperclip
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/
