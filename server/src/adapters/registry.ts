@@ -581,10 +581,11 @@ const hermesLocalAdapter: ServerAdapterModule = {
       },
     };
 
-    const prevSessionId = asString(
-      (normalizedCtx.runtime?.sessionParams as Record<string, unknown> | null)?.sessionId ?? null,
-      normalizedCtx.runtime?.sessionId ?? null,
-    );
+    const prevSessionId =
+      asString(
+        (normalizedCtx.runtime?.sessionParams as Record<string, unknown> | null)?.sessionId ?? null,
+        normalizedCtx.runtime?.sessionId ?? "",
+      ) || null;
 
     const runHermes = (resumeSessionId: string | null) =>
       executeHermesLocal({
