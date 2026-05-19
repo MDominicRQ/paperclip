@@ -22,6 +22,14 @@ if [ "$(id -g node)" -ne "$PGID" ]; then
     changed=1
 fi
 
+ensure_hermes_home_permissions() {
+    chown node:node /paperclip
+    chmod u+rwx /paperclip
+    chown -R node:node "$HERMES_HOME"
+    find "$HERMES_HOME" -type d -exec chmod u+rwx {} + 2>/dev/null || true
+    find "$HERMES_HOME" -type f -exec chmod u+rw  {} + 2>/dev/null || true
+}
+
 if [ "$changed" = "1" ]; then
     chown -R node:node /paperclip
 fi
@@ -75,6 +83,6 @@ if [ -x /opt/hermes/.venv/bin/python ]; then
     fi
 fi
 
-chown -R node:node "$HERMES_HOME"
+ensure_hermes_home_permissions
 
 exec gosu node "$@"

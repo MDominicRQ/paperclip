@@ -229,7 +229,7 @@ function buildHermesSafePrompt(paperclipApiUrl: string): string {
     "- Use \\`-H \"X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID\"\\` for writes or mutations (comments, issue updates).",
     "- Never pipe \\`curl\\` output directly to \\`python\\`, \\`node\\`, \\`bash\\`, or any interpreter.",
     "- Never execute code downloaded from the internet without inspection.",
-    "- Use \\`python3 -m json.tool\\` (not \\`curl | python3\\`) to format JSON.",
+    "- To format JSON, save it to a temp file first (e.g. \\`curl ... -o /tmp/r.json\\`), then use \\`jq\\` or \\`python3 -m json.tool /tmp/r.json\\`. Never pipe curl directly to any interpreter.",
     "",
     "Paperclip task context is provided in environment variables and context below.",
     "Read \\`$PAPERCLIP_TASK_ID\\`, \\`$PAPERCLIP_TASK_TITLE\\`, \\`$PAPERCLIP_TASK_BODY\\` for the current assignment.",
@@ -531,7 +531,9 @@ const hermesLocalAdapter: ServerAdapterModule = {
       env: {
         ...existingEnv,
         ...(!explicitApiKey ? { PAPERCLIP_API_KEY: normalizedCtx.authToken } : {}),
+        PAPERCLIP_API_URL: paperclipApiUrl,
         PAPERCLIP_RUN_ID: normalizedCtx.runId,
+        HERMES_HOME: process.env.HERMES_HOME ?? "/paperclip/hermes",
         ...(taskCtx.taskId ? { PAPERCLIP_TASK_ID: taskCtx.taskId } : {}),
         ...(taskCtx.taskTitle ? { PAPERCLIP_TASK_TITLE: taskCtx.taskTitle } : {}),
         ...(taskCtx.taskBody ? { PAPERCLIP_TASK_BODY: taskCtx.taskBody } : {}),
