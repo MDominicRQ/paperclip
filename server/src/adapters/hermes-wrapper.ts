@@ -30,6 +30,7 @@ import {
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
 type HermesExecutionContext = Parameters<typeof hermesExecute>[0];
+const REQUIRED_HERMES_PAPERCLIP_SKILLS = new Set(["paperclip", "paperclip-create-agent"]);
 
 function readRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -53,6 +54,20 @@ function resolveSharedHermesHome(config: Record<string, unknown>): string {
 
 function resolvePaperclipHermesSkillsHome(config: Record<string, unknown>): string {
   return path.join(resolveSharedHermesHome(config), "skills", "paperclip");
+}
+
+async function ensureRequiredHermesPaperclipSkills(config: Record<string, unknown>): Promise<void> {
+  const availableEntries = await readPaperclipRuntimeSkillEntries(config, __moduleDir);
+  const paperclipSkillsHome = resolvePaperclipHermesSkillsHome(config);
+  await fs.mkdir(paperclipSkillsHome, { recursive: true });
+
+  for (const available of availableEntries) {
+    if (!available.required && !REQUIRED_HERMES_PAPERCLIP_SKILLS.has(available.runtimeName)) continue;
+    await ensurePaperclipSkillSymlink(
+      available.source,
+      path.join(paperclipSkillsHome, available.runtimeName),
+    );
+  }
 }
 
 function parseSkillDescription(content: string): string | null {
@@ -181,6 +196,12 @@ async function buildHermesSkillSnapshot(config: Record<string, unknown>): Promis
 export async function executeHermesWrapper(
   ctx: AdapterExecutionContext,
 ): Promise<AdapterExecutionResult> {
+  try {
+    await ensureRequiredHermesPaperclipSkills(readRecord(ctx.config));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await ctx.onLog("stderr", `[adapter:hermes_local] Failed to prepare Paperclip skills: ${message}\n`);
+  }
   const wrappedCtx: HermesExecutionContext = {
     runId: ctx.runId,
     agent: ctx.agent,

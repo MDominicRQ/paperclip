@@ -341,6 +341,8 @@ describe("server adapter registry", () => {
       env: {
         OPENAI_API_KEY: "llm-token",
         PAPERCLIP_API_KEY: "agent-run-jwt",
+        PAPERCLIP_AGENT_ID: "agent-123",
+        PAPERCLIP_COMPANY_ID: "company-123",
         PAPERCLIP_RUN_ID: "run-123",
       },
     });
@@ -447,8 +449,10 @@ describe("server adapter registry", () => {
     expect(tmpl).toContain("Never pipe curl output to python");
     expect(tmpl).toContain("PAPERCLIP_TASK_ID");
     expect(tmpl).toContain("PAPERCLIP_WAKE_REASON");
-    expect(tmpl).toContain("PAPERCLIP_TASK_TITLE");
-    expect(tmpl).toContain("PAPERCLIP_TASK_BODY");
+    expect(tmpl).toContain("PAPERCLIP_AGENT_ID");
+    expect(tmpl).toContain("PAPERCLIP_COMPANY_ID");
+    expect(tmpl).toContain("paperclip-create-agent");
+    expect(tmpl).toContain("/agent-hires");
   });
 
   it("injects task context vars into env when issue is assigned", async () => {
@@ -523,7 +527,7 @@ describe("server adapter registry", () => {
     const tmpl = patchedCtx.agent.adapterConfig.promptTemplate as string;
     expect(tmpl).toContain("Authorization: Bearer $PAPERCLIP_API_KEY");
     expect(tmpl).toContain("Do your work and汇报");
-    expect(tmpl).not.toContain("Never pipe curl output to python");
+    expect(tmpl).toContain("Never pipe curl output to python");
   });
 
   it("retries with fresh session when Hermes returns 'Session not found'", async () => {

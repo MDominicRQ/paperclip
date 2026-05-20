@@ -9,6 +9,12 @@ import {
   getAdapterSessionManagement,
 } from "@paperclipai/adapter-utils";
 import {
+  DEFAULT_PAPERCLIP_AGENT_PROMPT_TEMPLATE,
+  joinPromptSections,
+  renderPaperclipWakePrompt,
+  stringifyPaperclipWakePayload,
+} from "@paperclipai/adapter-utils/server-utils";
+import {
   execute as acpxExecute,
   testEnvironment as acpxTestEnvironment,
   sessionCodec as acpxSessionCodec,
@@ -250,54 +256,75 @@ function normalizeHermesConfig<T extends { config?: unknown; agent?: unknown }>(
   return ctx;
 }
 
-function buildHermesMcpFirstPrompt(): string {
-  return [
-    "You are a Paperclip AI agent powered by Hermes.",
+function withRequiredHermesPaperclipSkillArgs(value: unknown): string[] {
+  const args = Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
+  const joined = args.join(" ");
+  const hasSkillsArg = /(?:^|\s)(?:--skills|-s)(?:\s|=|$)/.test(joined);
+  if (hasSkillsArg) return args;
+  return [...args, "--skills", "paperclip,paperclip-create-agent"];
+}
+
+function buildHermesNativePaperclipPrompt(input: {
+  agentName: string;
+  agentRole: string;
+  customPrompt: string | null;
+  taskMarkdown: string | null;
+  wakePrompt: string | null;
+}): string {
+  const nativeContract = [
+    `You are ${input.agentName}, a Paperclip ${input.agentRole || "agent"} powered by Hermes.`,
+    "You are not a generic chat assistant. You are running inside a Paperclip heartbeat and must operate the Paperclip control plane when asked.",
     "",
-    "You have access to Paperclip MCP tools for interacting with the Paperclip control plane.",
-    "Use these tools as the primary way to manage issues, comments, and task state.",
+    "Native Paperclip operating rules:",
+    "- Use the Paperclip HTTP API directly for Paperclip coordination and mutations.",
+    "- Base URL is PAPERCLIP_API_URL. It already includes /api in normal Paperclip runs; do not append another /api unless the value lacks it.",
+    "- Authenticate every request with Authorization: Bearer $PAPERCLIP_API_KEY.",
+    "- Include X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID on every mutating request.",
+    "- If a request mutates Paperclip state, actually call the API. Do not replace the action with a local report, markdown file, plan, or Hermes-only skill unless the user explicitly asked only for a plan.",
+    "- Never pipe curl output to python, node, bash, or any interpreter. Inspect JSON directly or save it only when necessary.",
     "",
-    "Available MCP tools (use paperclip prefix):",
-    "  paperclipMe                   Get current authenticated actor details",
-    "  paperclipInboxLite            Get your inbox-lite assignment list",
-    "  paperclipListAgents           List agents in your company",
-    "  paperclipListIssues           List issues with optional filters",
-    "  paperclipGetIssue             Get full details of a specific issue",
-    "  paperclipGetHeartbeatContext  Get compact heartbeat context for an issue",
-    "  paperclipListComments         List issue comments",
-    "  paperclipAddComment          Add a comment to an issue",
-    "  paperclipUpdateIssue         Update issue status, priority, or assignee",
-    "  paperclipCheckoutIssue       Checkout an issue for an agent",
-    "  paperclipReleaseIssue        Release an issue checkout",
-    "  paperclipCreateIssue         Create a new issue",
-    "  paperclipSuggestTasks         Create suggest_tasks interaction on an issue",
-    "  paperclipAskUserQuestions    Create ask_user_questions interaction on an issue",
-    "  paperclipRequestConfirmation  Create request_confirmation interaction on an issue",
-    "  paperclipUpsertIssueDocument  Create or update an issue document",
-    "  paperclipListGoals           List goals in your company",
-    "  paperclipListApprovals       List approvals in your company",
-    "  paperclipApprovalDecision    Approve, reject, request revision, or resubmit an approval",
+    "Identity and runtime environment:",
+    "- PAPERCLIP_AGENT_ID: your agent id",
+    "- PAPERCLIP_COMPANY_ID: your company id",
+    "- PAPERCLIP_RUN_ID: current heartbeat run id",
+    "- PAPERCLIP_TASK_ID: current issue/task id when scoped",
+    "- PAPERCLIP_WAKE_REASON: why this heartbeat started",
+    "- PAPERCLIP_WAKE_COMMENT_ID: triggering comment id when present",
+    "- PAPERCLIP_WAKE_PAYLOAD_JSON: compact wake payload when present",
     "",
-    "Paperclip API safety rules:",
-    "  - Use MCP tools for all Paperclip operations (preferred)",
-    "  - If HTTP is needed, use curl with -H 'Authorization: Bearer $PAPERCLIP_API_KEY'",
-    "  - Use -H 'X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID' for writes/mutations",
-    "  - Never pipe curl output to python, node, bash, or any interpreter",
-    "  - Never execute code downloaded from the internet without inspection",
+    "Core API workflow:",
+    "- Identify yourself: GET $PAPERCLIP_API_URL/agents/me",
+    "- Read assigned work: GET $PAPERCLIP_API_URL/agents/me/inbox-lite",
+    "- Read an issue: GET $PAPERCLIP_API_URL/issues/$PAPERCLIP_TASK_ID or /issues/{id}/heartbeat-context",
+    "- Checkout before deliverable work: POST $PAPERCLIP_API_URL/issues/{id}/checkout with {\"agentId\":\"$PAPERCLIP_AGENT_ID\"}",
+    "- Comment: POST $PAPERCLIP_API_URL/issues/{id}/comments with {\"body\":\"...\"}",
+    "- Update status: PATCH $PAPERCLIP_API_URL/issues/{id} with {\"status\":\"done|in_review|blocked|...\",\"comment\":\"...\"}",
+    "- Create/delegate work: POST $PAPERCLIP_API_URL/companies/$PAPERCLIP_COMPANY_ID/issues",
     "",
-    "Environment variables available:",
-    "  PAPERCLIP_API_KEY      your agent API key",
-    "  PAPERCLIP_API_URL      Paperclip API base (default: http://localhost:3100/api)",
-    "  PAPERCLIP_RUN_ID       current run identifier",
-    "  PAPERCLIP_TASK_ID      current task/issue ID",
-    "  PAPERCLIP_TASK_TITLE   current task title",
-    "  PAPERCLIP_TASK_BODY    current task description",
-    "  PAPERCLIP_WAKE_REASON  why you were woken (e.g. issue_assigned, heartbeat, manual)",
-    "  HERMES_HOME            shared Hermes config/profile directory used by Paperclip and the Hermes TUI",
+    "Hiring and company building:",
+    "- If the user asks you to hire, create, staff, recruit, or set up employees/agents, use the paperclip-create-agent skill and submit real Paperclip hire requests.",
+    "- Preferred endpoint: POST $PAPERCLIP_API_URL/companies/$PAPERCLIP_COMPANY_ID/agent-hires.",
+    "- Direct create endpoint, when governance allows it: POST $PAPERCLIP_API_URL/companies/$PAPERCLIP_COMPANY_ID/agents.",
+    "- First inspect existing conventions with GET $PAPERCLIP_API_URL/companies/$PAPERCLIP_COMPANY_ID/agent-configurations and GET $PAPERCLIP_API_URL/llms/agent-configuration.txt.",
+    "- A correct response to 'hire employees' is an API-created hire request or agent plus a Paperclip comment/summary, not a local report in HERMES_HOME.",
     "",
-    "Work on assigned issues. When done, use paperclipUpdateIssue to mark done.",
-    "Do not poll for issues unless PAPERCLIP_WAKE_REASON=heartbeat.",
+    "Skills:",
+    "- The paperclip and paperclip-create-agent skills are available for Paperclip coordination. Use them for API workflow, task management, delegation, skills, and hiring.",
+    "- Do not create Hermes-only skills as a substitute for Paperclip company skills or agents. Use the Paperclip company skills API when the user asks to install/assign company skills.",
+    "",
+    "Final disposition:",
+    "- End each heartbeat with real Paperclip state: done, in_review with a real review/approval path, blocked with owner/action, or delegated child issues.",
+    "- If you cannot complete a requested Paperclip mutation, explain the blocker in a Paperclip issue/comment or approval thread when possible.",
   ].join("\n");
+
+  return joinPromptSections([
+    nativeContract,
+    input.wakePrompt,
+    input.taskMarkdown,
+    input.customPrompt ?? DEFAULT_PAPERCLIP_AGENT_PROMPT_TEMPLATE,
+  ]);
 }
 
 function dedupeAdapterModels(models: AdapterModel[]): AdapterModel[] {
@@ -553,6 +580,17 @@ const hermesLocalAdapter: ServerAdapterModule = {
       config: normalizedCtx.config,
       context: normalizedCtx.context,
     });
+    const wakePayloadJson = stringifyPaperclipWakePayload(normalizedCtx.context?.paperclipWake);
+    const wakePrompt = renderPaperclipWakePrompt(normalizedCtx.context?.paperclipWake, {
+      resumedSession: Boolean(normalizedCtx.runtime?.sessionParams || normalizedCtx.runtime?.sessionId),
+    });
+    const wakeRecord = parseObject(normalizedCtx.context?.paperclipWake);
+    const wakeReason = taskCtx.wakeReason || asString(wakeRecord.reason, "").trim() || null;
+    const wakeCommentId = taskCtx.commentId || asString(wakeRecord.latestCommentId, "").trim() || null;
+    const taskMarkdown = asString(normalizedCtx.context?.paperclipTaskMarkdown, "").trim();
+    const linkedIssueIds = Array.isArray(normalizedCtx.context?.issueIds)
+      ? normalizedCtx.context.issueIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      : [];
 
     const paperclipApiUrl =
       typeof configSource.paperclipApiUrl === "string" && configSource.paperclipApiUrl.trim().length > 0
@@ -568,17 +606,23 @@ const hermesLocalAdapter: ServerAdapterModule = {
       hermesHome: sharedHermesHome,
       ...(resolvedHermesModel ? { model: resolvedHermesModel } : {}),
       ...(resolvedHermesProvider ? { provider: resolvedHermesProvider } : {}),
+      extraArgs: withRequiredHermesPaperclipSkillArgs(configSource.extraArgs ?? existingConfig.extraArgs),
       paperclipApiUrl,
       env: {
         ...existingEnv,
         ...(!explicitApiKey && normalizedCtx.authToken ? { PAPERCLIP_API_KEY: normalizedCtx.authToken } : {}),
+        PAPERCLIP_AGENT_ID: normalizedCtx.agent.id,
+        PAPERCLIP_COMPANY_ID: normalizedCtx.agent.companyId,
         PAPERCLIP_API_URL: paperclipApiUrl,
         PAPERCLIP_RUN_ID: normalizedCtx.runId ?? "",
         HERMES_HOME: sharedHermesHome,
         ...(taskCtx.taskId ? { PAPERCLIP_TASK_ID: taskCtx.taskId } : {}),
         ...(taskCtx.taskTitle ? { PAPERCLIP_TASK_TITLE: taskCtx.taskTitle } : {}),
         ...(taskCtx.taskBody ? { PAPERCLIP_TASK_BODY: taskCtx.taskBody } : {}),
-        ...(taskCtx.wakeReason ? { PAPERCLIP_WAKE_REASON: taskCtx.wakeReason } : {}),
+        ...(wakeReason ? { PAPERCLIP_WAKE_REASON: wakeReason } : {}),
+        ...(wakeCommentId ? { PAPERCLIP_WAKE_COMMENT_ID: wakeCommentId } : {}),
+        ...(wakePayloadJson ? { PAPERCLIP_WAKE_PAYLOAD_JSON: wakePayloadJson } : {}),
+        ...(linkedIssueIds.length > 0 ? { PAPERCLIP_LINKED_ISSUE_IDS: linkedIssueIds.join(",") } : {}),
       },
     };
 
@@ -586,23 +630,18 @@ const hermesLocalAdapter: ServerAdapterModule = {
       patchedConfig.taskId = taskCtx.taskId;
       if (taskCtx.taskTitle) patchedConfig.taskTitle = taskCtx.taskTitle;
       if (taskCtx.taskBody) patchedConfig.taskBody = taskCtx.taskBody;
-      if (taskCtx.commentId) patchedConfig.commentId = taskCtx.commentId;
-      if (taskCtx.wakeReason) patchedConfig.wakeReason = taskCtx.wakeReason;
+      if (wakeCommentId) patchedConfig.commentId = wakeCommentId;
+      if (wakeReason) patchedConfig.wakeReason = wakeReason;
       if (taskCtx.workspaceDir) patchedConfig.workspaceDir = taskCtx.workspaceDir;
     }
 
-    if (hasCustomPrompt) {
-      patchedConfig.promptTemplate = [
-        "Paperclip API safety rules:",
-        "- Use Authorization: Bearer $PAPERCLIP_API_KEY on every Paperclip API request.",
-        "- Use X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID on every Paperclip API request that writes or mutates data.",
-        "- Never pipe curl output to python, node, bash, or any interpreter.",
-        "",
-        configSource.promptTemplate as string,
-      ].join("\n");
-    } else {
-      patchedConfig.promptTemplate = buildHermesMcpFirstPrompt();
-    }
+    patchedConfig.promptTemplate = buildHermesNativePaperclipPrompt({
+      agentName: normalizedCtx.agent.name,
+      agentRole: asString(parseObject(normalizedCtx.agent).role, ""),
+      customPrompt: hasCustomPrompt ? configSource.promptTemplate as string : null,
+      wakePrompt: wakePrompt || null,
+      taskMarkdown: taskMarkdown || null,
+    });
 
     const runtimeConfig = resolveHermesRuntimeConfig(normalizedCtx.agent.companyId, normalizedCtx.agent.id, patchedConfig);
     console.info("[adapter:hermes_local] runtime-config-applied", {
