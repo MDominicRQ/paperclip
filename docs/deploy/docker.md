@@ -69,3 +69,10 @@ docker run --name paperclip \
 ```
 
 Without API keys, the app runs normally — adapter environment checks will surface missing prerequisites.
+
+## Hermes Adapter in Docker
+
+The Docker image includes the Hermes CLI and uses a shared Hermes home at `/paperclip/hermes`.
+Run `hermes setup` or the Hermes TUI against that same home so Paperclip sees the configured provider, model, sessions, memory, and skills.
+
+Paperclip-managed skills are linked into `/paperclip/hermes/skills/paperclip`, alongside any user-installed Hermes skills under `/paperclip/hermes/skills`.

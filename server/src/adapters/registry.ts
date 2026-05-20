@@ -128,9 +128,9 @@ import {
   executeHermesWrapper,
   testEnvironmentHermesWrapper,
   hermesSessionCodec,
-  hermesListSkills,
-  hermesSyncSkills,
-  detectModelFromHermes,
+  listHermesSkillsWrapper,
+  syncHermesSkillsWrapper,
+  detectModelFromHermesWrapper,
 } from "./hermes-wrapper.js";
 import { resolveHermesRuntimeConfig } from "./hermes-runtime-config.js";
 import {
@@ -293,7 +293,7 @@ function buildHermesMcpFirstPrompt(): string {
     "  PAPERCLIP_TASK_TITLE   current task title",
     "  PAPERCLIP_TASK_BODY    current task description",
     "  PAPERCLIP_WAKE_REASON  why you were woken (e.g. issue_assigned, heartbeat, manual)",
-    "  HERMES_HOME            Hermes config/profile directory for this agent (per-agent isolation)",
+    "  HERMES_HOME            shared Hermes config/profile directory used by Paperclip and the Hermes TUI",
     "",
     "Work on assigned issues. When done, use paperclipUpdateIssue to mark done.",
     "Do not poll for issues unless PAPERCLIP_WAKE_REASON=heartbeat.",
@@ -525,18 +525,28 @@ const hermesLocalAdapter: ServerAdapterModule = {
   execute: async (ctx) => {
     const normalizedCtx = normalizeHermesConfig(ctx);
 
-    const companyId = normalizedCtx.agent?.companyId ?? "";
-    const agentId = normalizedCtx.agent?.id ?? "";
-    const agentHermesHome = `/paperclip/hermes/agents/${companyId}/${agentId}`;
-
     const existingConfig = (normalizedCtx.agent?.adapterConfig ?? {}) as Record<string, unknown>;
     const configSource = (normalizedCtx.config ?? {}) as Record<string, unknown>;
-    const existingEnv = (existingConfig.env as Record<string, string>) ?? {};
+    const existingEnv = {
+      ...parseObject(existingConfig.env),
+      ...parseObject(configSource.env),
+    } as Record<string, string>;
+    const sharedHermesHome =
+      typeof configSource.hermesHome === "string" && configSource.hermesHome.trim().length > 0
+        ? configSource.hermesHome.trim()
+        : typeof existingConfig.hermesHome === "string" && existingConfig.hermesHome.trim().length > 0
+          ? existingConfig.hermesHome.trim()
+          : process.env.HERMES_HOME ?? "/paperclip/hermes";
 
     const explicitApiKey =
       typeof existingEnv.PAPERCLIP_API_KEY === "string" && existingEnv.PAPERCLIP_API_KEY.trim().length > 0;
     const hasCustomPrompt =
       typeof configSource.promptTemplate === "string" && configSource.promptTemplate.trim().length > 0;
+    const detectedHermesModel = await detectModelFromHermesWrapper(sharedHermesHome).catch(() => null);
+    const resolvedHermesModel =
+      asString(configSource.model, "") || asString(existingConfig.model, "") || detectedHermesModel?.model || "";
+    const resolvedHermesProvider =
+      asString(configSource.provider, "") || asString(existingConfig.provider, "") || detectedHermesModel?.provider || "";
 
     const taskCtx = normalizeHermesContextTask({
       agent: normalizedCtx.agent,
@@ -555,14 +565,16 @@ const hermesLocalAdapter: ServerAdapterModule = {
     const patchedConfig: Record<string, unknown> = {
       ...existingConfig,
       ...(pushedConfigVersion ? { paperclipConfigVersion: pushedConfigVersion } : {}),
-      hermesHome: agentHermesHome,
+      hermesHome: sharedHermesHome,
+      ...(resolvedHermesModel ? { model: resolvedHermesModel } : {}),
+      ...(resolvedHermesProvider ? { provider: resolvedHermesProvider } : {}),
       paperclipApiUrl,
       env: {
         ...existingEnv,
         ...(!explicitApiKey && normalizedCtx.authToken ? { PAPERCLIP_API_KEY: normalizedCtx.authToken } : {}),
         PAPERCLIP_API_URL: paperclipApiUrl,
         PAPERCLIP_RUN_ID: normalizedCtx.runId ?? "",
-        HERMES_HOME: agentHermesHome,
+        HERMES_HOME: sharedHermesHome,
         ...(taskCtx.taskId ? { PAPERCLIP_TASK_ID: taskCtx.taskId } : {}),
         ...(taskCtx.taskTitle ? { PAPERCLIP_TASK_TITLE: taskCtx.taskTitle } : {}),
         ...(taskCtx.taskBody ? { PAPERCLIP_TASK_BODY: taskCtx.taskBody } : {}),
@@ -600,7 +612,7 @@ const hermesLocalAdapter: ServerAdapterModule = {
       model: runtimeConfig.model,
       capabilities: runtimeConfig.capabilities,
       configHash: runtimeConfig.configHash,
-      hermesHome: agentHermesHome,
+      hermesHome: sharedHermesHome,
       resolvedAt: runtimeConfig.resolvedAt,
       cacheState: runtimeConfig.cacheState,
     });
@@ -618,15 +630,15 @@ const hermesLocalAdapter: ServerAdapterModule = {
   },
   testEnvironment: testEnvironmentHermesWrapper,
   sessionCodec: hermesSessionCodec,
-  listSkills: hermesListSkills,
-  syncSkills: hermesSyncSkills,
+  listSkills: listHermesSkillsWrapper,
+  syncSkills: syncHermesSkillsWrapper,
   models: hermesModels,
   supportsLocalAgentJwt: true,
   supportsInstructionsBundle: false,
   requiresMaterializedRuntimeSkills: false,
   agentConfigurationDoc: hermesAgentConfigurationDoc,
   detectModel: async () => {
-    const detected = await detectModelFromHermes();
+    const detected = await detectModelFromHermesWrapper();
     if (!detected) return detected;
     console.info("[adapter:hermes_local] detect-model", {
       provider: detected.provider,

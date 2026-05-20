@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import type {
   AdapterEnvironmentCheck,
   AdapterEnvironmentTestContext,
@@ -26,6 +28,9 @@ export async function testEnvironment(
   const hermesHome = typeof config.hermesHome === "string" && config.hermesHome.trim()
     ? config.hermesHome.trim()
     : process.env.HERMES_HOME ?? "/paperclip/hermes";
+  const configPath = path.join(hermesHome, "config.yaml");
+  const envPath = path.join(hermesHome, ".env");
+  const skillsPath = path.join(hermesHome, "skills");
   const mcpServerPath = typeof config.mcpServerPath === "string" && config.mcpServerPath.trim()
     ? config.mcpServerPath.trim()
     : "/usr/local/bin/paperclip-mcp-server";
@@ -65,10 +70,50 @@ export async function testEnvironment(
   });
 
   checks.push({
-    code: "hermes_home_isolation",
+    code: "hermes_shared_home",
     level: "info",
     message: `HERMES_HOME: ${hermesHome}`,
-    detail: "Each agent gets a per-company/per-agent HERMES_HOME under /paperclip/hermes/agents/<companyId>/<agentId>",
+    detail: "Paperclip uses the shared Hermes home so CLI/TUI configuration, sessions, memory, and skills stay unified.",
+  });
+
+  const configContent = await fs.readFile(configPath, "utf8").catch(() => null);
+  checks.push({
+    code: "hermes_shared_config",
+    level: configContent ? "info" : "warn",
+    message: configContent ? `Hermes config found: ${configPath}` : `Hermes config not found: ${configPath}`,
+    detail: configContent
+      ? "Paperclip should see the same config created by hermes setup or the Hermes TUI."
+      : "Run hermes setup with this HERMES_HOME, or mount/copy your existing Hermes config here.",
+  });
+
+  const envContent = await fs.readFile(envPath, "utf8").catch(() => null);
+  const hasEnvProviderKey = Boolean(envContent && /^(OPENROUTER_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|NOUS_API_KEY)=.+/m.test(envContent));
+  const hasConfigProvider = Boolean(configContent && /^\s*(provider|base_url|default)\s*:/m.test(configContent));
+  const hasProcessProviderKey = ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "NOUS_API_KEY"]
+    .some((key) => typeof process.env[key] === "string" && process.env[key]!.trim().length > 0);
+  checks.push({
+    code: "hermes_provider_credentials",
+    level: hasEnvProviderKey || hasProcessProviderKey || hasConfigProvider ? "info" : "warn",
+    message: hasEnvProviderKey || hasProcessProviderKey || hasConfigProvider
+      ? "Hermes provider configuration detected"
+      : "No Hermes provider credentials detected in shared .env or process env",
+    detail: hasEnvProviderKey
+      ? `Provider key found in ${envPath}.`
+      : hasProcessProviderKey
+        ? "Provider key found in process environment."
+        : hasConfigProvider
+          ? `Provider/model fields found in ${configPath}.`
+          : "Hermes may trigger non-interactive setup unless config.yaml points at a configured provider or a provider API key is available.",
+  });
+
+  const skillDirs = await fs.readdir(skillsPath, { withFileTypes: true }).catch(() => []);
+  checks.push({
+    code: "hermes_shared_skills",
+    level: "info",
+    message: `Hermes skills directory: ${skillsPath}`,
+    detail: skillDirs.length > 0
+      ? `${skillDirs.filter((entry) => entry.isDirectory()).length} skill categories/directories detected.`
+      : "No Hermes skills detected yet. Paperclip-managed skills will be linked under skills/paperclip when synced.",
   });
 
   return {

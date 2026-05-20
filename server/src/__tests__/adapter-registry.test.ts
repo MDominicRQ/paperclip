@@ -22,6 +22,7 @@ vi.mock("hermes-paperclip-adapter/server", () => ({
   listSkills: async () => [],
   syncSkills: async () => ({ entries: [] }),
   detectModel: async () => null,
+  parseModelFromConfig: () => null,
 }));
 
 import {
@@ -385,7 +386,7 @@ describe("server adapter registry", () => {
     expect(patchedCtx.agent.adapterConfig.env.PAPERCLIP_API_KEY).toBe("agent-run-jwt");
   });
 
-  it("passes the original Hermes context through when authToken is absent", async () => {
+  it("keeps explicit Hermes API keys when authToken is absent", async () => {
     const adapter = requireServerAdapter("hermes_local");
     const ctx = {
       runId: "run-123",
@@ -413,7 +414,9 @@ describe("server adapter registry", () => {
     await adapter.execute(ctx);
 
     expect(hermesExecuteMock).toHaveBeenCalledTimes(1);
-    expect(hermesExecuteMock).toHaveBeenCalledWith(ctx);
+    const [patchedCtx] = hermesExecuteMock.mock.calls[0];
+    expect(patchedCtx.agent.adapterConfig.env.PAPERCLIP_API_KEY).toBe("server-level-key");
+    expect(patchedCtx.agent.adapterConfig.env.HERMES_HOME).toBe(process.env.HERMES_HOME ?? "/paperclip/hermes");
   });
 
   it("injects safe prompt when no custom promptTemplate is set", async () => {
