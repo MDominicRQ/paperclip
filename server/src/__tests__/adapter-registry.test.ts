@@ -654,6 +654,47 @@ describe("server adapter registry", () => {
     expect(result.sessionParams).toEqual({ sessionId: "sess_abc123def456" });
     expect(result.clearSession).toBeUndefined();
   });
+
+  it("wraps Hermes onSpawn to inject processGroupId: null for Paperclip", async () => {
+    hermesExecuteMock.mockReset();
+    let wrappedOnSpawnArgs: unknown = null;
+
+    hermesExecuteMock.mockImplementationOnce(async (ctx) => {
+      if (ctx.onSpawn) {
+        await ctx.onSpawn({ pid: 12345, startedAt: "2026-05-20T00:00:00.000Z" });
+      }
+      return { exitCode: 0, signal: null, timedOut: false };
+    });
+
+    const adapter = requireServerAdapter("hermes_local");
+
+    await adapter.execute({
+      runId: "run-123",
+      agent: {
+        id: "agent-123",
+        companyId: "company-123",
+        name: "Hermes Agent",
+        role: "engineer",
+        adapterType: "hermes_local",
+        adapterConfig: {},
+      },
+      runtime: {},
+      config: {},
+      context: {},
+      onLog: async () => {},
+      onMeta: async () => {},
+      onSpawn: async (meta) => {
+        wrappedOnSpawnArgs = meta;
+      },
+      authToken: "agent-run-jwt",
+    });
+
+    expect(wrappedOnSpawnArgs).toMatchObject({
+      pid: 12345,
+      processGroupId: null,
+      startedAt: "2026-05-20T00:00:00.000Z",
+    });
+  });
 });
 
 describe("resolveExternalAdapterRegistration", () => {

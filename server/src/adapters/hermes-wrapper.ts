@@ -1,6 +1,8 @@
 import type {
   AdapterEnvironmentTestContext,
   AdapterEnvironmentTestResult,
+  AdapterExecutionContext,
+  AdapterExecutionResult,
 } from "@paperclipai/adapter-utils";
 import {
   execute as hermesExecute,
@@ -15,9 +17,15 @@ import {
 } from "hermes-paperclip-adapter";
 
 export async function executeHermesWrapper(
-  ctx: Parameters<typeof hermesExecute>[0],
-): Promise<ReturnType<typeof hermesExecute>> {
-  return hermesExecute(ctx);
+  ctx: AdapterExecutionContext,
+): Promise<AdapterExecutionResult> {
+  const wrappedCtx: AdapterExecutionContext = {
+    ...ctx,
+    onSpawn: ctx.onSpawn
+      ? (meta) => ctx.onSpawn!({ pid: meta.pid, processGroupId: null, startedAt: meta.startedAt })
+      : undefined,
+  };
+  return hermesExecute(wrappedCtx);
 }
 
 export async function testEnvironmentHermesWrapper(
