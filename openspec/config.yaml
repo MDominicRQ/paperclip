@@ -1,0 +1,89 @@
+schema: spec-driven
+project: paperclip
+artifact_store: openspec
+initialized_at: "2026-06-27"
+
+context: |
+  Paperclip is a pnpm 9 monorepo for a TypeScript/Node control plane for autonomous AI companies.
+  Runtime components: Express REST API in server/, React 19 + Vite board UI in ui/, Drizzle/PostgreSQL data layer in packages/db/, shared contracts in packages/shared/, adapters and plugins under packages/.
+  V1 behavior is governed by doc/SPEC-implementation.md; company scoping, single-assignee issues, atomic checkout, approval gates, budget hard stops, and activity logging are control-plane invariants.
+  Development uses Node 20+ locally, embedded PostgreSQL when DATABASE_URL is unset, and PR CI uses Node 24 with pnpm 9.15.4.
+  Default verification starts with targeted checks; full PR-ready handoff uses typecheck, Vitest, and build, with browser suites opt-in.
+
+strict_tdd: true
+strict_tdd_reason: >-
+  No explicit strict TDD marker or previous openspec/config.yaml was found. Vitest is configured at the root and across workspaces, server integration tests use Supertest, and Playwright suites exist for browser flows, so SDD enables strict TDD by fallback while keeping browser suites opt-in per AGENTS.md and doc/DEVELOPING.md.
+
+testing:
+  detected_at: "2026-06-27"
+  package_manager: pnpm@9.15.4
+  runtime:
+    local: Node.js 20+
+    ci: Node.js 24
+  default:
+    command: pnpm test
+    framework: Vitest
+    notes: Root script delegates to pnpm test:run, which runs scripts/run-vitest-stable.mjs after workspace link preflight.
+  targeted:
+    - command: pnpm test:watch
+      layer: unit
+      notes: Interactive Vitest watch mode.
+    - command: pnpm test:run:general -- --group <group>
+      layer: unit-integration
+      notes: CI uses grouped general suites.
+    - command: pnpm test:run:serialized -- --shard-index <n> --shard-count <n>
+      layer: integration
+      notes: CI uses serialized server shards.
+  browser:
+    - command: pnpm test:e2e
+      framework: Playwright
+      notes: Opt-in local/CI browser suite using a throwaway Paperclip instance.
+    - command: pnpm test:release-smoke
+      framework: Playwright
+      notes: Opt-in release smoke browser suite.
+  quality:
+    typecheck: pnpm -r typecheck
+    root_typecheck: pnpm -r typecheck
+    build: pnpm build
+    full_pr_ready:
+      - pnpm -r typecheck
+      - pnpm test:run
+      - pnpm build
+    lint: null
+    formatter: null
+    coverage: null
+
+rules:
+  proposal:
+    - Use doc/SPEC-implementation.md as the V1 contract when product docs conflict.
+    - Keep proposals company-scoped and name impacted control-plane invariants.
+    - Include rollback or recovery notes for risky changes.
+  specs:
+    - Use RFC 2119 keywords for requirements.
+    - Include Given/When/Then scenarios for externally observable behavior.
+    - Keep contracts synchronized across packages/db, packages/shared, server, and ui when schema or API behavior changes.
+  design:
+    - Preserve company boundaries, single-assignee task ownership, atomic checkout semantics, approval gates, budget hard-stop behavior, and activity logging.
+    - Document adapter/plugin boundaries explicitly; external adapters must not force hardcoded core imports unless the change intentionally updates built-in adapter behavior.
+  tasks:
+    - Group work by reviewable slices sized for the 800-line review budget and single-pr-default strategy.
+    - Keep database changes paired with schema exports, migrations, shared validators/types, server routes/services, and UI/API-client updates as needed.
+  apply:
+    tdd: true
+    test_command: pnpm test
+    notes:
+      - Start with the smallest targeted check that proves the change.
+      - For UI component or page work, use the design-guide skill and preserve existing design tokens/components.
+  verify:
+    test_command: pnpm test
+    typecheck_command: pnpm -r typecheck
+    build_command: pnpm build
+    browser_commands:
+      - pnpm test:e2e
+      - pnpm test:release-smoke
+    coverage_threshold: 0
+    notes:
+      - Browser suites are opt-in unless the change touches browser flows or release/CI verification.
+      - If any required check cannot be run, report the exact command and reason.
+  archive:
+    - Merge accepted deltas into openspec/specs/ and preserve archived changes under openspec/changes/archive/YYYY-MM-DD-{change-name}/.
