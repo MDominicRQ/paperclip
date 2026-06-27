@@ -31,20 +31,6 @@ services:
       BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}"
     volumes:
       - paperclip-data:/paperclip
-      # --- Volúmenes para Claude Code ---
-      - ../.claude:/root/.claude
-      - ../.config/claude-code:/home/node/.config/claude-code
-      
-      # --- Volúmenes para OpenCode ---
-      - ../.local/share/opencode:/home/node/.local/share/opencode
-      - ../.config/opencode:/home/node/.config/opencode
-
-      # --- Volumenes para Gemini ---
-      - ../.gemini:/root/.gemini
-      - ../.config/gemini:/home/node/.config/gemini
-
-      # --- Volumenes Github CLI ---
-      - ../.config/gh:/home/node/.config/gh
     depends_on:
       db:
         condition: service_healthy

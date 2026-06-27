@@ -13,7 +13,6 @@ import {
   plugins,
   projects,
   projectWorkspaces,
-  eq,
 } from "@paperclipai/db";
 import {
   getEmbeddedPostgresTestSupport,
@@ -675,50 +674,4 @@ describeEmbeddedPostgres("heartbeat plugin environments", () => {
       adapterType: "codex_local",
     });
   }, 15_000);
-
-  it("stamps configVersion/modelId per run and applies config changes only to new runs", async () => {
-    const companyId = randomUUID();
-    const agentId = randomUUID();
-    const now = new Date();
-    await db.insert(companies).values({
-      id: companyId, name: "Acme", issuePrefix: "ACME", status: "active", createdAt: now, updatedAt: now,
-    });
-    await db.insert(agents).values({
-      id: agentId,
-      companyId,
-      name: "Hermes Agent",
-      role: "engineer",
-      status: "idle",
-      adapterType: "hermes_local",
-      adapterConfig: { model: "hermes-v1" },
-      runtimeConfig: {},
-      permissions: {},
-      createdAt: now,
-      updatedAt: new Date("2026-05-14T10:00:00.000Z"),
-    });
-    const heartbeat = heartbeatService(db, {});
-    const run1 = await heartbeat.wakeup(agentId, { source: "on_demand", triggerDetail: "manual" });
-    expect(run1).not.toBeNull();
-    const storedRun1 = await heartbeat.getRun(run1!.id);
-    const run1Context = (storedRun1?.contextSnapshot ?? {}) as Record<string, unknown>;
-    expect(run1Context.configVersion).toBe("2026-05-14T10:00:00.000Z");
-    expect(run1Context.modelId).toBe("hermes-v1");
-
-    await db.update(agents).set({
-      adapterConfig: { model: "hermes-v2" },
-      updatedAt: new Date("2026-05-14T10:05:00.000Z"),
-    }).where(eq(agents.id, agentId));
-
-    const run2 = await heartbeat.wakeup(agentId, { source: "on_demand", triggerDetail: "manual" });
-    const storedRun2 = await heartbeat.getRun(run2!.id);
-    const run2Context = (storedRun2?.contextSnapshot ?? {}) as Record<string, unknown>;
-    expect(run2Context.configVersion).toBe("2026-05-14T10:05:00.000Z");
-    expect(run2Context.modelId).toBe("hermes-v2");
-
-    // Previous run trace remains unchanged after config edit.
-    const run1AfterChange = await heartbeat.getRun(run1!.id);
-    const run1AfterContext = (run1AfterChange?.contextSnapshot ?? {}) as Record<string, unknown>;
-    expect(run1AfterContext.configVersion).toBe("2026-05-14T10:00:00.000Z");
-    expect(run1AfterContext.modelId).toBe("hermes-v1");
-  });
 });

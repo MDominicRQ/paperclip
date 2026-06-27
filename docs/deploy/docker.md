@@ -78,10 +78,3 @@ Each adapter reads its provider's standard credentials — for example `ANTHROPI
 The image sets `GEMINI_SANDBOX=false` so the Gemini CLI does not try to launch its own (Docker-in-Docker) sandbox inside the container. The `gemini_local` adapter already passes `--sandbox=none` per run, so this env var only matters if you invoke `gemini` manually inside the container; override it if you have nested-container support and want CLI-level sandboxing.
 
 Without API keys, the app runs normally — adapter environment checks will surface missing prerequisites.
-
-## Hermes Adapter in Docker
-
-The Docker image includes the Hermes CLI and uses a shared Hermes home at `/paperclip/hermes`.
-Run `hermes setup` or the Hermes TUI against that same home so Paperclip sees the configured provider, model, sessions, memory, and skills.
-
-Paperclip-managed skills are linked into `/paperclip/hermes/skills/paperclip`, alongside any user-installed Hermes skills under `/paperclip/hermes/skills`.
