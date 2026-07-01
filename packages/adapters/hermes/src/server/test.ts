@@ -13,11 +13,13 @@ import type {
 
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { HERMES_CLI, DEFAULT_MODEL, ADAPTER_TYPE, VALID_PROVIDERS } from "../shared/constants.js";
 import { detectModel, resolveProvider, inferProviderFromModel } from "./detect-model.js";
 import { resolveHermesCommand } from "./execute.js";
+import { resolveHermesHomeSync } from "./hermes-home.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -151,8 +153,7 @@ async function checkApiKeys(
   // accurate results for keys that Hermes already knows about.
   const hermesEnvKeys: Record<string, string> = {};
   try {
-    const homeDir = process.env.HOME || process.env.USERPROFILE || "/root";
-    const hermesEnvPath = `${homeDir}/.hermes/.env`;
+    const hermesEnvPath = join(resolveHermesHomeSync(), ".env");
     const content = readFileSync(hermesEnvPath, "utf-8");
     for (const line of content.split("\n")) {
       const trimmed = line.trim();
