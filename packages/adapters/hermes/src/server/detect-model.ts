@@ -10,8 +10,9 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { MODEL_PREFIX_PROVIDER_HINTS, VALID_PROVIDERS } from "../shared/constants.js";
+
+import { resolveHermesHomeSync } from "./hermes-home.js";
 
 export interface DetectedModel {
   /** Model name from config (e.g. "gpt-5.4", "anthropic/claude-sonnet-4") */
@@ -34,7 +35,7 @@ export interface DetectedModel {
 export async function detectModel(
   configPath?: string,
 ): Promise<DetectedModel | null> {
-  const filePath = configPath ?? join(homedir(), ".hermes", "config.yaml");
+  const filePath = configPath ?? join(resolveHermesHomeSync(), "config.yaml");
 
   let content: string;
   try {

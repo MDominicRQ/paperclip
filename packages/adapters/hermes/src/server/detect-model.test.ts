@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 
-import { parseModelFromConfig, resolveProvider } from "./detect-model.js";
+import { detectModel, parseModelFromConfig, resolveProvider } from "./detect-model.js";
 import { testEnvironment } from "./test.js";
 
 const providerEnvKeys = [
@@ -18,6 +18,7 @@ const providerEnvKeys = [
 const previousEnv = {
   HOME: process.env.HOME,
   USERPROFILE: process.env.USERPROFILE,
+  HERMES_HOME: process.env.HERMES_HOME,
   HOMEDRIVE: process.env.HOMEDRIVE,
   HOMEPATH: process.env.HOMEPATH,
   ...Object.fromEntries(providerEnvKeys.map((key) => [key, process.env[key]])),
@@ -183,4 +184,87 @@ test("testEnvironment does not warn about missing API keys when Hermes config pr
     expect(codes.includes("hermes_no_api_keys")).toBe(false);
     expect(result.status).toBe("pass");
   });
+});
+
+async function withExplicitHermesHome(
+  hermesHome: string,
+  configLines: string[],
+  fn: (configPath: string) => Promise<void>,
+): Promise<void> {
+  const hermesDir = hermesHome;
+  const configPath = join(hermesDir, "config.yaml");
+
+  await mkdir(hermesDir, { recursive: true });
+  await writeFile(configPath, `${configLines.join("\n")}\n`, "utf8");
+
+  try {
+    await fn(configPath);
+  } finally {
+    await rm(hermesHome, { recursive: true, force: true });
+  }
+}
+
+test("detectModel honors HERMES_HOME without appending .hermes again", async () => {
+  const hermesHome = join(
+    await mkdtemp(join(tmpdir(), "hermes-detect-model-")),
+    ".hermes",
+  );
+
+  await withExplicitHermesHome(hermesHome, [
+    "model:",
+    "  default: openrouter/gpt-4.1-mini",
+    "  provider: openrouter",
+  ], async () => {
+    delete process.env.HOME;
+    delete process.env.USERPROFILE;
+    process.env.HERMES_HOME = hermesHome;
+
+    const result = await detectModel();
+
+    expect(result).toBeTruthy();
+    expect(result?.model).toBe("openrouter/gpt-4.1-mini");
+    expect(result?.provider).toBe("openrouter");
+  });
+});
+
+test("detectModel with no config returns null (resolver returns valid path, file is absent)", async () => {
+  // Use an explicit empty configPath so the test is hermetic — process.env
+  // may already point at a real ~/.hermes/config.yaml in the dev environment.
+  const result = await detectModel(join(tmpdir(), "definitely-does-not-exist.yaml"));
+  expect(result).toBeNull();
+});
+
+test("detectModel explicit configPath still wins over HERMES_HOME", async () => {
+  const explicitHome = await mkdtemp(join(tmpdir(), "hermes-detect-model-explicit-"));
+  const explicitConfig = join(explicitHome, "my-config.yaml");
+  await writeFile(
+    explicitConfig,
+    [
+      "model:",
+      "  default: oca/gpt-5.4",
+      "  provider: custom",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const otherHome = join(explicitHome, ".hermes");
+  await mkdir(otherHome, { recursive: true });
+  await writeFile(
+    join(otherHome, "config.yaml"),
+    [
+      "model:",
+      "  default: anthropic/claude-sonnet-4",
+      "  provider: anthropic",
+    ].join("\n"),
+    "utf8",
+  );
+
+  try {
+    process.env.HERMES_HOME = otherHome;
+    const result = await detectModel(explicitConfig);
+    expect(result?.model).toBe("oca/gpt-5.4");
+    expect(result?.provider).toBe("custom");
+  } finally {
+    await rm(explicitHome, { recursive: true, force: true });
+  }
 });
