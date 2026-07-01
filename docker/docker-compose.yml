@@ -34,6 +34,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Surface server startup failures via 'docker compose ps' instead of
+    # leaving operators with only a healthy db container. start_period
+    # absorbs the embedded-Postgres init + Drizzle migration window so
+    # a cold boot doesn't trip the curl probe prematurely.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3100/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
   pgdata:
