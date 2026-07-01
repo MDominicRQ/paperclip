@@ -6,13 +6,12 @@
 # Usage: ./scripts/docker-hermes-smoke.sh [OPENAI_API_KEY] [ANTHROPIC_API_KEY]
 #
 # Positional args are forwarded as compose env vars so the spawned hermes_local
-# agent has an inference provider. Without either key, the spawn will still
-# exercise Hermes' path resolution and session creation; the heartbeat run will
-# likely end in `failed` with a "no model configured" message, and the script
-# will exit non-zero because the strict BHR-S5 "real successful run" check
-# requires an inference provider. The Hermes filesystem evidence check
-# (`/paperclip/.hermes/sessions`) still runs and is the proof that the
-# hermes_local binary actually executed inside the container.
+# agent has an inference provider. The strict BHR-S5 "real successful run" check
+# requires at least one of OPENAI_API_KEY / ANTHROPIC_API_KEY; without either,
+# the heartbeat run will end in `failed` with a "no model configured" message,
+# but the script exits 0 (DEGRADED-PASS) because the Hermes filesystem evidence
+# check (`/paperclip/.hermes/sessions`) still proves the hermes_local binary
+# actually executed inside the container. Pass both keys for the strict pass.
 
 set -euo pipefail
 
